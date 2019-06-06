@@ -1,13 +1,22 @@
 import React from 'react';
 import {
   // Loop,
-  CrossFade,
+  PanVol,
   Transport,
   MonoSynth,
   BasicOscillatorType,
   FilterType,
   Part,
 } from 'tone';
+
+import {
+  flatten,
+  isUndefined,
+  last,
+  random,
+  sample,
+  times,
+} from 'lodash';
 
 interface IProps {
 }
@@ -39,6 +48,57 @@ function buildMonoSynth(overrides = {}) {
   }).toMaster();
 }
 
+function makeChannel(instrument: any): void {
+  const channel = new PanVol(0, 0.5).toMaster();
+  instrument.chain(channel);
+}
+
+function generateSubdivision(
+  offset: string,
+  chooseNote: Function,
+) {
+  const numNotes = random(0, 4);
+  if (numNotes === 0) return [];
+
+  const timings: number[] = [];
+
+  for (let i = 0; i < numNotes; i++) {
+    const lastTiming = last(timings);
+    const notesRemaining = 4 - numNotes;
+
+    const min = isUndefined(lastTiming) ? 0 : lastTiming + 1;
+    const max = min + notesRemaining < 3 ? min + notesRemaining : min;
+
+    timings.push(random(min, max));
+  }
+
+  return timings.map((i) => {
+    return [`${offset}:${i}`, chooseNote()]
+  });
+}
+
+function pickNote(): string {
+  return sample(['C4', 'E3', 'G3', 'C4']) as string;
+}
+
+function generatePattern(length = 0) {
+  return flatten(times(length, (i) => {
+    const subdivisions: any[] = [];
+    return subdivisions.concat(generateSubdivision(`${i}.0`, pickNote))
+      .concat(generateSubdivision(`${i}.1`, pickNote))
+      .concat(generateSubdivision(`${i}.2`, pickNote))
+      .concat(generateSubdivision(`${i}.3`, pickNote))
+  }));
+}
+
+function generatePart(length: number, action: any, loopLength: number) {
+  const pattern = generatePattern(length);
+  const part = new Part(action, pattern);
+  part.loopEnd = length;
+  part.loop = loopLength;
+  return part;
+}
+
 export default class Composition extends React.Component<IProps, IState> {
   startAudio(): void {
     Transport.start();
@@ -46,42 +106,22 @@ export default class Composition extends React.Component<IProps, IState> {
     const synth1 = buildMonoSynth();
     const synth2 = buildMonoSynth();
 
-    const crossFade = new CrossFade(0.5);
-    synth1.connect(crossFade, 0, 0);
-    synth2.connect(crossFade, 0, 1);
-    crossFade.fade.value = 0.5;
+		makeChannel(synth1);
+		makeChannel(synth2);
 
-    const part = new Part(
-      function(time, value){
-        synth1.triggerAttackRelease(value.note, "8n", time, value.velocity);
-      },
-      [
-        { time: '1:1', note: 'C3', velocity: 0.2 },
-        { time: '1:2', note: 'E3', velocity: 0.2 },
-        { time: '1:3', note: 'G3', velocity: 0.2 },
-        { time: '1:4', note: 'C4', velocity: 0.2 },
-      ],
-    );
+    function synth1Action(time: any, note: string) {
+      synth1.triggerAttackRelease(note, '8n', time);
+    }
 
-    part.loop = true;
-    part.start(0);
+    const part1 = generatePart(3, synth1Action, 2);
+    part1.start(0);
 
-    // const part2 = new Part(
-      // function(time, value){
-        // synth2.triggerAttackRelease(value.note, "8n", time, value.velocity);
-      // },
-      // [
-        // { time: 0, note: 'E3', velocity: 0.2 },
-        // { time: '0:1:2', note: 'G3', velocity: 0.2 },
-        // { time: '0:2:3', note: 'E4', velocity: 0.2 },
-        // { time: '0:3', note: 'E4', "velocity": 0.2 },
-      // ],
-    // );
+    function synth2Action(time: any, note: string) {
+      synth2.triggerAttackRelease(note, '8n', time);
+    }
 
-    // part2.loop = true;
-    // part2.start(0);
-
-    // play a note with the synth we setup
+    const part2 = generatePart(1, synth2Action, 10);
+    part2.start(0);
   }
 
   render() {
